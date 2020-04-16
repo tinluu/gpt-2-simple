@@ -120,9 +120,11 @@ def reset_session(sess, threads=-1, server=None):
     sess = start_tf_sess(threads, server)
     return sess
 
+
 def get_available_gpus():
     local_device_protos = device_lib.list_local_devices()
     return [x.name for x in local_device_protos if x.device_type == 'GPU']
+
 
 def finetune(sess,
              dataset,
@@ -147,13 +149,12 @@ def finetune(sess,
              only_train_transformer_layers=False,
              optimizer='adam',
              overwrite=False):
-    """Finetunes the model on the given dataset.
+    
+    """Finetunes the model (124M or 355M) on the given dataset.
 
     Adapted from https://github.com/nshepperd/gpt-2/blob/finetuning/train.py.
     See that file for parameter definitions.
     """
-
-    # assert model_name not in ['774M', '1558M'] or multi_gpu, "Currently, a modern single GPU cannot finetune the 774M GPT-2 model or larger."
 
     SAMPLE_DIR = 'samples'
 
@@ -177,6 +178,7 @@ def finetune(sess,
 
     enc = encoder.get_encoder(checkpoint_path)
     hparams = model.default_hparams()
+    
     with open(os.path.join(checkpoint_path, 'hparams.json')) as f:
         hparams.override_from_dict(json.load(f))
 
@@ -188,7 +190,8 @@ def finetune(sess,
         use_memory_saving_gradients = True
         only_train_transformer_layers = True
         accumulate_gradients = 1
-
+        
+    ################################################################
     context = tf.compat.v1.placeholder(tf.int32, [batch_size, None])
     gpus = []
 
@@ -198,7 +201,9 @@ def finetune(sess,
     output = model.model(hparams=hparams, X=context, gpus=gpus)
     loss = tf.reduce_mean(
         input_tensor=tf.nn.sparse_softmax_cross_entropy_with_logits(
-            labels=context[:, 1:], logits=output['logits'][:, :-1]))
+            labels=context[:, 1:], 
+            logits=output['logits'][:, :-1]))
+    ################################################################
 
     tf_sample = sample.sample_sequence(
         hparams=hparams,
@@ -210,11 +215,8 @@ def finetune(sess,
 
     all_vars = [v for v in tf.compat.v1.trainable_variables() if 'model' in v.name]
     train_vars = [v for v in all_vars if '/h' in v.name] if only_train_transformer_layers else all_vars
-
-    if optimizer == 'adam':
-        opt = tf.compat.v1.train.AdamOptimizer(learning_rate=learning_rate)
-    elif optimizer == 'sgd':
-        opt = tf.compat.v1.train.GradientDescentOptimizer(learning_rate=learning_rate)
+    
+    opt = tf.compat.v1.train.AdamOptimizer(learning_rate=learning_rate)
 
     if accumulate_gradients > 1:
         if use_memory_saving_gradients:
@@ -289,9 +291,7 @@ def finetune(sess,
         all_text = []
         index = 0
         while index < sample_num:
-            out = sess.run(
-                tf_sample,
-                feed_dict={context: batch_size * [context_tokens]})
+            out = sess.run(tf_sample, feed_dict={context: batch_size * [context_tokens]})
             for i in range(min(sample_num - index, batch_size)):
                 text = enc.decode(out[i])
                 text = '======== SAMPLE {} ========\n{}\n'.format(
@@ -333,8 +333,7 @@ def finetune(sess,
             if accumulate_gradients > 1:
                 sess.run(opt_reset)
                 for _ in range(accumulate_gradients):
-                    sess.run(
-                        opt_compute, feed_dict={context: sample_batch()})
+                    sess.run(opt_compute, feed_dict={context: sample_batch()})
                 (v_loss, v_summary) = sess.run((opt_apply, summary_loss))
             else:
                 (_, v_loss, v_summary) = sess.run(
